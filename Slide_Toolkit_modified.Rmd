@@ -1,0 +1,760 @@
+---
+title: "Express Scan - association plaque characteristics and OLINK plasma proteins"
+author:
+- Joost M. Mekke
+- MD
+output:
+  html_notebook:
+    cache: yes
+    code_folding: hide
+    collapse: yes
+    df_print: paged
+    fig.align: center
+    fig_caption: yes
+    fig_height: 10
+    fig_retina: 2
+    fig_width: 12
+    theme: paper
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  html_document:
+    df_print: paged
+    toc: yes
+mainfont: Helvetica
+subtitle: An 'Express Scan' project
+editor_options:
+  chunk_output_type: inline
+---
+```{r global_options, include = FALSE}
+# further define some knitr-options.
+knitr::opts_chunk$set(fig.width = 12, fig.height = 8, fig.path = 'Figures/', eval=TRUE, warning=FALSE, message = FALSE)
+```
+
+# Preparation
+Clean the environment
+```{r ClearEnvironment, include = FALSE}
+rm(list=ls())
+```
+
+Set locations, and the working directory.
+```{r LocalSystem, include=FALSE}
+### MacBook Pro
+PROJECT_loc = "C:\\Users\\anton\\Documents\\UMCU\\Joost_data"
+AEDB_loc = "C:\\Users\\anton\\Documents\\UMCU\\Joost_data"
+
+### SOME VARIABLES WE NEED DOWN THE LINE
+PROJECTNAME = "OLINK_SlideToolkit"
+
+cat("\nCreate a new analysis directory...\n")
+ifelse(!dir.exists(file.path(PROJECT_loc, "\\",PROJECTNAME)), 
+       dir.create(file.path(PROJECT_loc, "\\",PROJECTNAME)), 
+       FALSE)
+ANALYSIS_loc = paste0(PROJECT_loc,"/",PROJECTNAME)
+# Plots
+ifelse(!dir.exists(file.path(ANALYSIS_loc, "/PLOTS")), 
+       dir.create(file.path(ANALYSIS_loc, "/PLOTS")), 
+       FALSE)
+PLOT_loc = paste0(ANALYSIS_loc,"/PLOTS")
+# Quality Control plots
+ifelse(!dir.exists(file.path(PLOT_loc, "/QC")), 
+       dir.create(file.path(PLOT_loc, "/QC")), 
+       FALSE)
+QC_loc = paste0(PLOT_loc,"/QC")
+# Output files
+ifelse(!dir.exists(file.path(ANALYSIS_loc, "/OUTPUT")), 
+       dir.create(file.path(ANALYSIS_loc, "/OUTPUT")), 
+       FALSE)
+OUT_loc = paste0(ANALYSIS_loc, "/OUTPUT")
+# COX analysis
+ifelse(!dir.exists(file.path(ANALYSIS_loc, "/COX")), 
+       dir.create(file.path(ANALYSIS_loc, "/COX")), 
+       FALSE)
+COX_loc = paste0(ANALYSIS_loc, "/COX")
+# Baseline characteristics
+ifelse(!dir.exists(file.path(ANALYSIS_loc, "/BASELINE")), 
+       dir.create(file.path(ANALYSIS_loc, "/BASELINE")), 
+       FALSE)
+BASELINE_loc = paste0(ANALYSIS_loc, "/BASELINE")
+
+cat("\nSetting working directory and listing its contents.\n")
+setwd(paste0(PROJECT_loc))
+getwd()
+list.files()
+```
+A package-installation function.
+```{r Function: installations, include = FALSE}
+install.packages.auto <- function(x) { 
+  x <- as.character(substitute(x)) 
+  if(isTRUE(x %in% .packages(all.available = TRUE))) { 
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  } else { 
+    # Update installed packages - this may mean a full upgrade of R, which in turn
+    # may not be warrented. 
+    # update.install.packages.auto(ask = FALSE) 
+    eval(parse(text = sprintf("install.packages(\"%s\", dependencies = TRUE, repos = \"https://cloud.r-project.org/\")", x)))
+  }
+  if(isTRUE(x %in% .packages(all.available = TRUE))) { 
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  } else {
+    if (!requireNamespace("BiocManager"))
+      install.packages("BiocManager")
+    # BiocManager::install() # this would entail updating installed packages, which in turned may not be warrented
+    eval(parse(text = sprintf("BiocManager::install(\"%s\")", x)))
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  }
+}
+```
+Load those packages.
+```{r Setting: loading_packages, include = FALSE}
+install.packages.auto("readr")
+install.packages.auto("optparse")
+install.packages.auto("tools")
+install.packages.auto("dplyr")
+install.packages.auto("tidyr")
+install.packages.auto("naniar")
+
+# To get 'data.table' with 'fwrite' to be able to directly write gzipped-files
+# Ref: https://stackoverflow.com/questions/42788401/is-possible-to-use-fwrite-from-data-table-with-gzfile
+# install.packages("data.table", repos = "https://Rdatatable.gitlab.io/data.table")
+library(data.table)
+
+install.packages.auto("tidyverse")
+install.packages.auto("knitr")
+install.packages.auto("DT")
+install.packages.auto("MASS")
+# install.packages.auto("Seurat") # latest version
+
+# Install the devtools package from Hadley Wickham
+install.packages.auto('devtools')
+
+install.packages.auto("haven")
+install.packages.auto("sjlabelled")
+install.packages.auto("sjPlot")
+install.packages.auto("labelled")
+install.packages.auto("tableone")
+install.packages.auto("foreign")
+install.packages.auto("ggpubr")
+install.packages.auto("ggplot2")
+install.packages.auto("survival")
+install.packages.auto("finalfit")
+install.packages.auto("car")
+
+install.packages.auto("factoextra")
+```
+We will create a datestamp and define the Utrecht Science Park Colour Scheme.
+```{R Setting: Colors, include = FALSE}
+
+Today = format(as.Date(as.POSIXlt(Sys.time())), "%Y%m%d")
+Today.Report = format(as.Date(as.POSIXlt(Sys.time())), "%A, %B %d, %Y")
+
+### UtrechtScienceParkColoursScheme
+###
+### WebsitetoconvertHEXtoRGB:http://hex.colorrrs.com.
+### Forsomefunctionsyoushoulddividethesenumbersby255.
+### 
+###	No.	Color			      HEX	(RGB)						              CHR		  MAF/INFO
+###---------------------------------------------------------------------------------------
+###	1	  yellow			    #FBB820 (251,184,32)				      =>	1		or 1.0>INFO
+###	2	  gold			      #F59D10 (245,157,16)				      =>	2		
+###	3	  salmon			    #E55738 (229,87,56)				      =>	3		or 0.05<MAF<0.2 or 0.4<INFO<0.6
+###	4	  darkpink		    #DB003F ((219,0,63)				      =>	4		
+###	5	  lightpink		    #E35493 (227,84,147)				      =>	5		or 0.8<INFO<1.0
+###	6	  pink			      #D5267B (213,38,123)				      =>	6		
+###	7	  hardpink		    #CC0071 (204,0,113)				      =>	7		
+###	8	  lightpurple	    #A8448A (168,68,138)				      =>	8		
+###	9	  purple			    #9A3480 (154,52,128)				      =>	9		
+###	10	lavendel		    #8D5B9A (141,91,154)				      =>	10		
+###	11	bluepurple		  #705296 (112,82,150)				      =>	11		
+###	12	purpleblue		  #686AA9 (104,106,169)			      =>	12		
+###	13	lightpurpleblue	#6173AD (97,115,173/101,120,180)	=>	13		
+###	14	seablue			    #4C81BF (76,129,191)				      =>	14		
+###	15	skyblue			    #2F8BC9 (47,139,201)				      =>	15		
+###	16	azurblue		    #1290D9 (18,144,217)				      =>	16		or 0.01<MAF<0.05 or 0.2<INFO<0.4
+###	17	lightazurblue	  #1396D8 (19,150,216)				      =>	17		
+###	18	greenblue		    #15A6C1 (21,166,193)				      =>	18		
+###	19	seaweedgreen	  #5EB17F (94,177,127)				      =>	19		
+###	20	yellowgreen		  #86B833 (134,184,51)				      =>	20		
+###	21	lightmossgreen	#C5D220 (197,210,32)				      =>	21		
+###	22	mossgreen		    #9FC228 (159,194,40)				      =>	22		or MAF>0.20 or 0.6<INFO<0.8
+###	23	lightgreen	  	#78B113 (120,177,19)				      =>	23/X
+###	24	green			      #49A01D (73,160,29)				      =>	24/Y
+###	25	grey			      #595A5C (89,90,92)				        =>	25/XY	or MAF<0.01 or 0.0<INFO<0.2
+###	26	lightgrey		    #A2A3A4	(162,163,164)			      =>	26/MT
+###
+###	ADDITIONAL COLORS
+###	27	midgrey			#D7D8D7
+###	28	verylightgrey	#ECECEC"
+###	29	white			#FFFFFF
+###	30	black			#000000
+###----------------------------------------------------------------------------------------------
+
+uithof_color = c("#FBB820","#F59D10","#E55738","#DB003F","#E35493","#D5267B",
+                 "#CC0071","#A8448A","#9A3480","#8D5B9A","#705296","#686AA9",
+                 "#6173AD","#4C81BF","#2F8BC9","#1290D9","#1396D8","#15A6C1",
+                 "#5EB17F","#86B833","#C5D220","#9FC228","#78B113","#49A01D",
+                 "#595A5C","#A2A3A4", "#D7D8D7", "#ECECEC", "#FFFFFF", "#000000")
+
+uithof_color_legend = c("#FBB820", "#F59D10", "#E55738", "#DB003F", "#E35493",
+                        "#D5267B", "#CC0071", "#A8448A", "#9A3480", "#8D5B9A",
+                        "#705296", "#686AA9", "#6173AD", "#4C81BF", "#2F8BC9",
+                        "#1290D9", "#1396D8", "#15A6C1", "#5EB17F", "#86B833",
+                        "#C5D220", "#9FC228", "#78B113", "#49A01D", "#595A5C",
+                        "#A2A3A4", "#D7D8D7", "#ECECEC", "#FFFFFF", "#000000")
+
+#ggplot2 default color palette
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]}
+```
+## Plasma protein data
+Loading Athero-Express plasma protein measurements from 2019/2020 as measured using OLINK.
+```{r LoadAE PlasmaProteins OLINK}
+library(openxlsx)
+AEDB_PlasmaProtein_OLINK_CVD2raw <- openxlsx::read.xlsx(paste0(AEDB_loc, "/20200706_AtheroExpress_OlinkData_forR.xlsx"), sheet = "CVD2_forR")
+AEDB_PlasmaProtein_OLINK_CVD3raw <- openxlsx::read.xlsx(paste0(AEDB_loc, "/20200706_AtheroExpress_OlinkData_forR.xlsx"), sheet = "CVD3_forR")
+AEDB_PlasmaProtein_OLINK_CMraw <- openxlsx::read.xlsx(paste0(AEDB_loc, "/20200706_AtheroExpress_OlinkData_forR.xlsx"), sheet = "CM_forR")
+AEDB_PlasmaProtein_OLINK_ProteinInfo <- openxlsx::read.xlsx(paste0(AEDB_loc, "/20200706_AtheroExpress_OlinkData_forR.xlsx"), sheet = "ProteinInfo")
+
+AEDB_PlasmaProtein_OLINK_CVD2 <- AEDB_PlasmaProtein_OLINK_CVD2raw %>% filter(QC_Warning_CVD2 == "Pass")
+AEDB_PlasmaProtein_OLINK_CVD3 <- AEDB_PlasmaProtein_OLINK_CVD3raw %>% filter(QC_Warning_CVD3 == "Pass")
+AEDB_PlasmaProtein_OLINK_CM <- AEDB_PlasmaProtein_OLINK_CMraw %>% filter(QC_Warning_CM == "Pass")
+
+table(AEDB_PlasmaProtein_OLINK_CVD2raw$QC_Warning_CVD2)
+table(AEDB_PlasmaProtein_OLINK_CVD2$QC_Warning_CVD2)
+
+table(AEDB_PlasmaProtein_OLINK_CVD3raw$QC_Warning_CVD3)
+table(AEDB_PlasmaProtein_OLINK_CVD3$QC_Warning_CVD3)
+
+table(AEDB_PlasmaProtein_OLINK_CMraw$QC_Warning_CM)
+table(AEDB_PlasmaProtein_OLINK_CM$QC_Warning_CM)
+
+AEDB_PlasmaProtein_OLINK_CVD2$Plate_ID <- NULL
+AEDB_PlasmaProtein_OLINK_CVD3$Plate_ID <- NULL
+AEDB_PlasmaProtein_OLINK_CVD2$Order <- NULL
+AEDB_PlasmaProtein_OLINK_CVD3$Order <- NULL
+AEDB_PlasmaProtein_OLINK_CM$Order <- NULL
+
+temp <- merge(AEDB_PlasmaProtein_OLINK_CVD2, AEDB_PlasmaProtein_OLINK_CVD3, by.x = "STUDY_NUMBER", by.y = "STUDY_NUMBER",
+              sort = FALSE, all.x = TRUE)
+
+AEDB_PlasmaProtein_OLINK <- merge(temp, AEDB_PlasmaProtein_OLINK_CM, by.x = "STUDY_NUMBER", by.y = "STUDY_NUMBER",
+              sort = FALSE, all.x = TRUE)
+
+AEDB_PlasmaProtein_OLINK$Plate_ID[AEDB_PlasmaProtein_OLINK$Plate_ID == "ERA_UMC_AE_cardiometabolic_plt1_29-10-19"] <- "plate 1"
+AEDB_PlasmaProtein_OLINK$Plate_ID[AEDB_PlasmaProtein_OLINK$Plate_ID == "ERA_UMC_AE_Cardiometabolic_plt2"] <- "plate 2"
+AEDB_PlasmaProtein_OLINK$Plate_ID[AEDB_PlasmaProtein_OLINK$Plate_ID == "ERA_UMC_AE_Cardiometabolic_plt3"] <- "plate 3"
+AEDB_PlasmaProtein_OLINK$Plate_ID[AEDB_PlasmaProtein_OLINK$Plate_ID == "ERA_UMC_AE_Cardiometabolic_plt4"] <- "plate 4"
+AEDB_PlasmaProtein_OLINK$Plate_ID[AEDB_PlasmaProtein_OLINK$Plate_ID == "ERA_UMC_AE_Cardiometabolic_plt5"] <- "plate 5"
+AEDB_PlasmaProtein_OLINK$Plate_ID[AEDB_PlasmaProtein_OLINK$Plate_ID == "ERA_UMC_AE_Cardiometabolic_pl6"] <- "plate 6"
+AEDB_PlasmaProtein_OLINK$Plate_ID[AEDB_PlasmaProtein_OLINK$Plate_ID == "SMART_CM_plt10"] <- "plate 10"
+AEDB_PlasmaProtein_OLINK$Plate_ID[AEDB_PlasmaProtein_OLINK$Plate_ID == "SMART_plt11_CM"] <- "plate 11"
+
+olink_proteins <- c("BMP6", "ANGPT1", "ADM", "CD40L", "SLAMF7", "PGF", "ADAMTS13", "BOC", "IL4RA", "SRC", "IL1ra", "IL6", "TNFRSF10A", "STK4", "IDUA", 
+                    "TNFRSF11A", "PAR1", "TRAILR2", "PRSS27", "TIE2", "TF", "IL1RL2", "PDGF_subunit_B", "IL27", "IL17D", "CXCL1", "LOX1", "Gal9", "GIF", "SCF", 
+                    "IL18", "FGF21", "PIgR", "RAGE", "SOD2", "CTRC", "FGF23", "SPON2", "GH", "FS", "GLO1", "CD84", "PAPPA", "SERPINA12", "REN", "DECR1", 
+                    "MERTK", "KIM1", "THBS2", "TM", "VSIG2", "AMBP", "PRELP", "HO1", "XCL1", "IL16", "SORT1", "CEACAM8", "PTX3", "PSGL1", "CCL17", "CCL3", 
+                    "MMP7", "IgG_Fc_receptor_IIb", "ITGB1BP2", "DCN", "Dkk1", "LPL", "PRSS8", "AGRP", "HBEGF", "GDF2", "FABP2", "THPO", "MARCO", "GT", "BNP", 
+                    "MMP12", "ACE2", "PDL2", "CTSL1", "hOSCAR", "TNFRSF13B", "TGM2", "LEP", "CA5A", "HSP_27", "CD4", "NEMO", "VEGFD", "PARP1", "HAOX1", 
+                    "TNFRSF14", "LDL_receptor", "ITGB2", "IL17RA", "TNFR2", "MMP9", "EPHB4", "IL2RA", "OPG", "ALCAM", "TFF3", "SELP", "CSTB", "MCP1", "CD163", 
+                    "Gal3", "GRN", "NTproBNP", "BLM_hydrolase", "PLC", "LTBR", "Notch_3", "TIMP4", "CNTN1", "CDH5", "TLT2", "FABP4", "TFPI", "PAI", "CCL24", 
+                    "TR", "TNFRSF10C", "GDF15", "SELE", "AZU1", "DLK1", "SPON1", "MPO", "CXCL16", "IL6RA", "RETN", "IGFBP1", "CHIT1", "TRAP", "GP6", "PSPD", 
+                    "PI3", "EpCAM", "APN", "AXL", "IL1RT1", "MMP2", "FAS", "MB", "TNFSF13B", "PRTN3", "PCSK9", "UPAR", "OPN", "CTSD", "PGLYRP1", "CPA1", "JAMA", 
+                    "Gal4", "IL1RT2", "SHPS1", "CCL15", "CASP3", "uPA", "CPB1", "CHI3L1", "ST2", "tPA", "SCGB3A2", "EGFR", "IGFBP7", "CD93", "IL18BP", "COL1A1", 
+                    "PON3", "CTSZ", "MMP3", "RARRES2", "ICAM2", "KLK6", "PDGF_subunit_A", "TNFR1", "IGFBP2", "vWF", "PECAM1", "MEPE", "CCL16", "PRCP","CA1", 
+                    "ICAM1", "CHL1", "TGFBI", "ENG", "PLTP", "SERPINA7", "IGFBP3", "CR2", "SERPINA5", "FCGR3B", "IGFBP6", "CDH1", "CCL5", "CCL14", "GNLY", 
+                    "NOTCH1", "PAM", "PROC", "CST3", "NCAM1", "PCOLCE", "LILRB1", "MET", "LTBP2", "IL7R", "VCAM1", "SELL", "F11", "COMP", "CA4", "PTPRS", 
+                    "MBL2", "TIMP1", "ANGPTL3", "REG3A", "SOD1", "CD46", "ITGAM", "TNC", "NID1", "CFHR5", "SPARCL1", "PLXNB2", "MEGF9", "ANG", "ST6GAL1", 
+                    "DPP4", "REG1A", "QPCT", "FCN2", "FETUB", "CES1", "CRTAC1", "TCN2", "PRSS2", "ICAM3", "SAA4", "CNDP1", "FCGR2A", "NRP1", "EFEMP1", "TIMD4", 
+                    "FAP", "TIE1", "THBS4", "F7", "GP1BA", "LYVE1", "CA3", "TGFBR3", "DEFA1", "CD59", "APOM", "OSMR", "LILRB2", "UMOD", "CCL18", "COL18A1", 
+                    "LCN2", "KIT", "C1QTNF1", "AOC3", "GAS6", "IGLC2", "PLA2G7", "TNXB", "MFAP5", "VASN", "LILRB5", "C2")
+
+length(olink_proteins)
+
+olink_proteins_rank = unlist(lapply(olink_proteins, paste0, "_rankNorm"))
+
+rm(temp)
+```
+
+### Inspect OLINK data
+
+We know that the proteins are not normally distributed and therefore we will standardise them as follows: 
+
+`z = ( x - μ ) / σ`
+
+Where for each sample, `x` equals the value of the variable, `μ` (_mu_) equals the mean of `x`, and `σ` (_sigma_) equals the standard deviation of `x`.
+
+```{r OLINKStandardize}
+for(PROTEIN in 1:length(olink_proteins)){
+  # AEDB_PlasmaProtein_OLINK$Z <- NULL
+  var.temp.z = olink_proteins_rank[PROTEIN]
+  var.temp = olink_proteins[PROTEIN]
+  
+  cat(paste0("\nSelecting ", var.temp, " and standardising: ", var.temp.z,".\n"))
+  cat(paste0("* changing ", var.temp, " to numeric.\n"))
+
+  AEDB_PlasmaProtein_OLINK <- AEDB_PlasmaProtein_OLINK %>%
+    mutate_each_(funs(as.numeric), olink_proteins) 
+  
+  cat(paste0("* standardising ", var.temp, 
+             " (mean: ",round(mean(!is.na(AEDB_PlasmaProtein_OLINK[,var.temp])), digits = 6),
+             ", n = ",sum(!is.na(AEDB_PlasmaProtein_OLINK[,var.temp])),").\n"))
+  
+  AEDB_PlasmaProtein_OLINK <- AEDB_PlasmaProtein_OLINK %>%
+      mutate_at(vars(var.temp), 
+        list(Z = ~ (AEDB_PlasmaProtein_OLINK[,var.temp] - mean(AEDB_PlasmaProtein_OLINK[,var.temp], na.rm = TRUE))/sd(AEDB_PlasmaProtein_OLINK[,var.temp], na.rm = TRUE))
+      )
+  # str(AEDB_PlasmaProtein_OLINK$Z)
+  cat(paste0("* renaming Z to ", var.temp.z,".\n"))
+  AEDB_PlasmaProtein_OLINK[,var.temp.z] <- NULL
+  names(AEDB_PlasmaProtein_OLINK)[names(AEDB_PlasmaProtein_OLINK) == "Z"] <- var.temp.z
+}
+
+rm(var.temp, var.temp.z)
+```
+Here we summarize some of these data in the subset of genetic data that passed QC.
+```{r OLINKSummary}
+
+for(PROTEIN in 1:length(olink_proteins)){
+  # AEDB_PlasmaProtein_OLINK$Z <- NULL
+  var.temp.z = olink_proteins_rank[PROTEIN]
+  var.temp = olink_proteins[PROTEIN]
+  
+  cat(paste0("\nSummarising data for ",var.temp," [AU]; n = ",sum(!is.na(AEDB_PlasmaProtein_OLINK[,var.temp])),".\n"))
+  print(summary(AEDB_PlasmaProtein_OLINK[,var.temp]))
+  print(summary(AEDB_PlasmaProtein_OLINK[,var.temp.z]))
+
+}
+rm(var.temp, var.temp.z, PROTEIN)
+```
+
+```{r OLINKVisualize , include=FALSE}
+require("ggpubr")
+require("ggsci")
+
+# mypal = pal_npg("nrc", alpha = 0.7)(9)
+# mypal
+# ## [1] "#E64B35B2" "#4DBBD5B2" "#00A087B2" "#3C5488B2" "#F39B7FB2" "#8491B4B2"
+# ## [7] "#91D1C2B2" "#DC0000B2" "#7E6148B2"
+# library("scales")
+# show_col(mypal)
+
+for(PROTEIN in 1:length(olink_proteins)){
+  # metabolite_unit = ucorbioNMRDataDictionary[ucorbioNMRDataDictionary$Metabolite_NMR == NMRtargets[METABOLITE], "Concentration_NMR"]
+  cat(paste0("\nProcessing metabolite [ ",olink_proteins[PROTEIN]," (AU)].\n"))
+
+  var.temp = olink_proteins[PROTEIN]
+  var.temp.z = paste0(olink_proteins[PROTEIN],"_rankNorm")
+   
+  dt.temp <- subset(AEDB_PlasmaProtein_OLINK, select = c("STUDY_NUMBER", var.temp, var.temp.z, "Plate_ID"))
+  dt.temp[,2] <- as.numeric(dt.temp[,2])
+  
+  p1 <- ggpubr::gghistogram(dt.temp %>% filter(!is.na(Plate_ID)),
+                    x = var.temp,
+                    y = "..count..",
+                    color = "#4DBBD5B2", fill = "#4DBBD5B2",
+                    # palette = "npg",
+                    rug = TRUE,
+                    add = "mean",
+                    xlab = paste0(var.temp," [AU]."),
+                    ggtheme = theme_minimal())
+  
+  my_comparisons <- list( c("plate 1", "plate 2"), 
+                          c("plate 1", "plate 3"), 
+                          c("plate 1", "plate 4"), 
+                          c("plate 1", "plate 5"), 
+                          c("plate 1", "plate 6"), 
+                          c("plate 1", "plate 10"), 
+                          c("plate 1", "plate 11") )
+  p2 <- ggpubr::ggboxplot(data = dt.temp %>% filter(!is.na(Plate_ID)),
+                          x = "Plate_ID",
+                          y = var.temp.z,
+                          color = "Plate_ID",
+                          palette = "npg",
+                          add = c("mean", "jitter"),
+                          # error.plot = "errorbar",
+                          xlab = "plates used",
+                          ylab = paste0(var.temp.z," [AU]."),
+                          # ylim = c(0,4),
+                          ggtheme = theme_minimal()) + stat_compare_means(method = "anova") + stat_compare_means(comparisons = my_comparisons) + stat_compare_means(label = "p.signif", method = "t.test", ref.group = "plate 1")
+  
+  
+  p3 <- ggpubr::gghistogram(dt.temp %>% filter(!is.na(Plate_ID)),
+                    x = var.temp.z,
+                    y = "..count..",
+                    color = "#91D1C2B2", fill = "#91D1C2B2",
+                    # palette = "npg",
+                    rug = TRUE,
+                    add = "mean",
+                    xlab = paste0(var.temp.z," [AU]."),
+                    ggtheme = theme_minimal())
+  
+  require(patchwork)
+  # p4 <- ((p1 / p3 ) | (p2))
+  
+  p4 <- ggpar(p1, legend = "" ) / ggpar(p2 + rotate_x_text(45), legend = "")  | ggpar(p3, legend = "right")
+  
+  print(p4)
+  ggsave(filename = paste0(QC_loc, "/",Today,".",PROJECTNAME,".OLINK.",var.temp,".png"),
+         plot = p4, device = "png", width = 20, height = 20)
+  
+}
+  # rm(my_comparisons,
+  #    p1, p2, p3, p4,
+  #    var.temp, var.temp.z, dt.temp, PROTEIN)
+
+```
+
+```{r}
+# Creating a new dataframe with only the normalized markers
+AEDB_PlasmaProtein_OLINK_rank <- AEDB_PlasmaProtein_OLINK[,c(1,288:563)]
+#AEDB_PlasmaProtein_OLINK_norm <- AEDB_PlasmaProtein_OLINK[,c(1:93,97:188,192:283)]
+#write.csv2(AEDB_PlasmaProtein_OLINK_rank,file= paste0(OUT_loc, "/", Today, "OLINKplasmarank.csv"), sep=';', row.names=TRUE, quote=FALSE)
+
+# Calculating what percent of the OLINK data per protein consists of missings
+p_missing <- unlist(lapply(AEDB_PlasmaProtein_OLINK_rank, function(x) sum(is.na(x))))/nrow(AEDB_PlasmaProtein_OLINK_rank)
+sort(p_missing[p_missing > 0], decreasing = TRUE)
+
+# The following markers have over >70% missing value (which means that the measurements were under the LOD (limit of detection)): 
+# -PRCP
+# -ITGAM
+# -SOD1
+# -FAP
+# -PARP1
+# -REG3A
+# -LCN2
+# -LTBP2
+# -QPCT
+# -DEFA1
+# -UMOD
+# -PAPPA
+
+x <- AEDB_PlasmaProtein_OLINK_rank[lapply(AEDB_PlasmaProtein_OLINK_rank, function(x) sum(is.na(x)) / length(x) ) < 0.70 ]
+colnames(x)
+# Check if the following OLINK proteins are indeed deleted from the dataframe
+p_missing2 <- unlist(lapply(x, function(x) sum(is.na(x))))/nrow(x)
+sort(p_missing2[p_missing2 > 0], decreasing = TRUE)
+
+# Somehow STUDY_NUMBER is deleted from the dataframe, re-add STUDY_NUMBER so that merging of the dataframes is possible
+# x$STUDY_NUMBER <- AEDB_PlasmaProtein_OLINK$STUDY_NUMBER
+
+AEDB_PlasmaProtein_OLINK_rank <- x
+colnames(AEDB_PlasmaProtein_OLINK_rank)
+```
+
+# Loading the ExpressScan data (this includes the AE clinical data as well)
+```{r, include = FALSE}
+#ExpressScan <-read.csv2(paste0(AEDB_loc,"/20210329ExpressScan.csv"))
+ExpressScan <-read.csv2(paste0(AEDB_loc,"/20210518_ExpressScan_histology_data.csv"))
+```
+
+# Merging the OLINK data with the ExpressScan data
+```{r, include = FALSE}
+ExpressScan_OLINK <- merge(ExpressScan,AEDB_PlasmaProtein_OLINK_rank, by= "STUDY_NUMBER", all=FALSE)
+
+#p_missing3 <- unlist(lapply(ExpressScan_OLINK, function(x) sum(is.na(x))))/nrow(ExpressScan_OLINK)
+#sort(p_missing3[p_missing2 > 0], decreasing = TRUE)
+```
+
+```{r Analysis Functions, include = FALSE}
+AEDB.CEA.samplesize = nrow(ExpressScan_OLINK)
+
+# Function to grep data from glm()/lm()
+GLM.CON <- function(fit, DATASET, x_name, y, verbose=c(TRUE,FALSE)){
+  cat("Analyzing in dataset '", DATASET ,"' the association of '", x_name ,"' with '", y ,"' .\n")
+  if (nrow(summary(fit)$coefficients) == 1) {
+    output = c(DATASET, x_name, y, rep(NA,8))
+    cat("Model not fitted; probably singular.\n")
+  }else {
+    cat("Collecting data.\n\n")
+    effectsize = summary(fit)$coefficients[2,1]
+    SE = summary(fit)$coefficients[2,2]
+    OReffect = exp(summary(fit)$coefficients[2,1])
+    CI_low = exp(effectsize - 1.96 * SE)
+    CI_up = exp(effectsize + 1.96 * SE)
+    tvalue = summary(fit)$coefficients[2,3]
+    pvalue = summary(fit)$coefficients[2,4]
+    R = summary(fit)$r.squared
+    R.adj = summary(fit)$adj.r.squared
+    sample_size = nrow(model.frame(fit))
+    AE_N = AEDB.CEA.samplesize
+    Perc_Miss = 100 - ((sample_size * 100)/AE_N)
+    
+    output = c(DATASET, x_name, y, effectsize, SE, OReffect, CI_low, CI_up, tvalue, pvalue, R, R.adj, AE_N, sample_size, Perc_Miss)
+    
+    if (verbose == TRUE) {
+    cat("We have collected the following and summarize it in an object:\n")
+    cat("Dataset...................:", DATASET, "\n")
+    cat("Score/Exposure/biomarker..:", x_name, "\n")
+    cat("Trait/outcome.............:", y, "\n")
+    cat("Effect size...............:", round(effectsize, 6), "\n")
+    cat("Standard error............:", round(SE, 6), "\n")
+    cat("Odds ratio (effect size)..:", round(OReffect, 3), "\n")
+    cat("Lower 95% CI..............:", round(CI_low, 3), "\n")
+    cat("Upper 95% CI..............:", round(CI_up, 3), "\n")
+    cat("T-value...................:", round(tvalue, 6), "\n")
+    cat("P-value...................:", signif(pvalue, 8), "\n")
+    print(R)
+    cat("R^2.......................:", round(R, 6), "\n")
+    cat("Adjusted r^2..............:", round(R.adj, 6), "\n")
+    cat("Sample size of AE DB......:", AE_N, "\n")
+    cat("Sample size of model......:", sample_size, "\n")
+    cat("Missing data %............:", round(Perc_Miss, 6), "\n")
+    } else {
+      cat("Collecting data in summary object.\n")
+    }
+  }
+  return(output)
+  print(output)
+}
+
+```
+
+```{r, include=FALSE}
+# Choose one of the following plaque characteristics
+# CD34: "Total_CD34_TissueCount_rank"
+# CD66b: "Total_CD66b_TissueCount_rank"
+# CD68: "Total_CD68_TissueCount_rank"
+# SMA: "Total_SMA_TissueCount_rank"
+# HE: "Total_HE_TissueCount_rank"
+# EVG: "Total_EVG_Tissue_rank"
+# GLYCC: "Total_GLYCC_Tissue_rank"
+
+# And the correct accompanying plaque sizes
+# CD34: PlaquesizeCD34_rank
+# CD66b: "PlaquesizeCD66_rank"
+# CD68: "PlaquesizeCD68_rank"
+# SMA: "PlaquesizeSMA_rank"
+# HE: "PlaquesizeHE_rank"
+# EVG: "PlaquesizeEVG_rank"
+# GLYCC:"PlaquesizeGlycc_rank"
+
+# List of the 7 plaque characteristics
+PLAQUE.CHARACTERISTICS.RANK = c("Total_CD34_TissueCount_rank", "Total_CD66b_TissueCount_rank", "Total_CD68_TissueCount_rank", "Total_SMA_TissueCount_rank", "Total_HE_TissueCount_rank", "Total_EVG_Tissue_rank", "Total_GLYCC_Tissue_rank") 
+
+# List of the plaque size covariates, index matches that of PLAQUE.CHARACTERISTICS.RANK
+COVARIATES_M1 = c("PlaquesizeCD34_rank", "PlaquesizeCD66b_rank", "PlaquesizeCD68_rank", "PlaquesizeSMA_rank", "PlaquesizeHE_rank", "PlaquesizeEVG_rank", "PlaquesizeGlycc_rank") 
+
+olink_proteins_rank <- c("BMP6_rankNorm", "ANGPT1_rankNorm", "ADM_rankNorm", "CD40L_rankNorm", "SLAMF7_rankNorm", "PGF_rankNorm", "ADAMTS13_rankNorm", "BOC_rankNorm", "IL4RA_rankNorm", "SRC_rankNorm", "IL1ra_rankNorm", "IL6_rankNorm", "TNFRSF10A_rankNorm", "STK4_rankNorm", "IDUA_rankNorm", 
+                    "TNFRSF11A_rankNorm", "PAR1_rankNorm", "TRAILR2_rankNorm", "PRSS27_rankNorm", "TIE2_rankNorm", "TF_rankNorm", "IL1RL2_rankNorm", "PDGF_subunit_B_rankNorm", "IL27_rankNorm", "IL17D_rankNorm", "CXCL1_rankNorm", "LOX1_rankNorm", "Gal9_rankNorm", "GIF_rankNorm", "SCF_rankNorm", 
+                    "IL18_rankNorm", "FGF21_rankNorm", "PIgR_rankNorm", "RAGE_rankNorm", "SOD2_rankNorm", "CTRC_rankNorm", "FGF23_rankNorm", "SPON2_rankNorm", "GH_rankNorm", "FS_rankNorm", "GLO1_rankNorm", "CD84_rankNorm", "SERPINA12_rankNorm", "REN_rankNorm", "DECR1_rankNorm", 
+                    "MERTK_rankNorm", "KIM1_rankNorm", "THBS2_rankNorm", "TM_rankNorm", "VSIG2_rankNorm", "AMBP_rankNorm", "PRELP_rankNorm", "HO1_rankNorm", "XCL1_rankNorm", "IL16_rankNorm", "SORT1_rankNorm", "CEACAM8_rankNorm", "PTX3_rankNorm", "PSGL1_rankNorm", "CCL17_rankNorm", "CCL3_rankNorm", 
+                    "MMP7_rankNorm", "IgG_Fc_receptor_IIb_rankNorm", "ITGB1BP2_rankNorm", "DCN_rankNorm", "Dkk1_rankNorm", "LPL_rankNorm", "PRSS8_rankNorm", "AGRP_rankNorm", "HBEGF_rankNorm", "GDF2_rankNorm", "FABP2_rankNorm", "THPO_rankNorm", "MARCO_rankNorm", "GT_rankNorm", "BNP_rankNorm", 
+                    "MMP12_rankNorm", "ACE2_rankNorm", "PDL2_rankNorm", "CTSL1_rankNorm", "hOSCAR_rankNorm", "TNFRSF13B_rankNorm", "TGM2_rankNorm", "LEP_rankNorm", "CA5A_rankNorm", "HSP_27_rankNorm", "CD4_rankNorm", "NEMO_rankNorm", "VEGFD_rankNorm", "HAOX1_rankNorm", 
+                    "TNFRSF14_rankNorm", "LDL_receptor_rankNorm", "ITGB2_rankNorm", "IL17RA_rankNorm", "TNFR2_rankNorm", "MMP9_rankNorm", "EPHB4_rankNorm", "IL2RA_rankNorm", "OPG_rankNorm", "ALCAM_rankNorm", "TFF3_rankNorm", "SELP_rankNorm", "CSTB_rankNorm", "MCP1_rankNorm", "CD163_rankNorm", 
+                    "Gal3_rankNorm", "GRN_rankNorm", "NTproBNP_rankNorm", "BLM_hydrolase_rankNorm", "PLC_rankNorm", "LTBR_rankNorm", "Notch_3_rankNorm", "TIMP4_rankNorm", "CNTN1_rankNorm", "CDH5_rankNorm", "TLT2_rankNorm", "FABP4_rankNorm", "TFPI_rankNorm", "PAI_rankNorm", "CCL24_rankNorm", 
+                    "TR_rankNorm", "TNFRSF10C_rankNorm", "GDF15_rankNorm", "SELE_rankNorm", "AZU1_rankNorm", "DLK1_rankNorm", "SPON1_rankNorm", "MPO_rankNorm", "CXCL16_rankNorm", "IL6RA_rankNorm", "RETN_rankNorm", "IGFBP1_rankNorm", "CHIT1_rankNorm", "TRAP_rankNorm", "GP6_rankNorm", "PSPD_rankNorm", 
+                    "PI3_rankNorm", "EpCAM_rankNorm", "APN_rankNorm", "AXL_rankNorm", "IL1RT1_rankNorm", "MMP2_rankNorm", "FAS_rankNorm", "MB_rankNorm", "TNFSF13B_rankNorm", "PRTN3_rankNorm", "PCSK9_rankNorm", "UPAR_rankNorm", "OPN_rankNorm", "CTSD_rankNorm", "PGLYRP1_rankNorm", "CPA1_rankNorm", "JAMA_rankNorm", 
+                    "Gal4_rankNorm", "IL1RT2_rankNorm", "SHPS1_rankNorm", "CCL15_rankNorm", "CASP3_rankNorm", "uPA_rankNorm", "CPB1_rankNorm", "CHI3L1_rankNorm", "ST2_rankNorm", "tPA_rankNorm", "SCGB3A2_rankNorm", "EGFR_rankNorm", "IGFBP7_rankNorm", "CD93_rankNorm", "IL18BP_rankNorm", "COL1A1_rankNorm", 
+                    "PON3_rankNorm", "CTSZ_rankNorm", "MMP3_rankNorm", "RARRES2_rankNorm", "ICAM2_rankNorm", "KLK6_rankNorm", "PDGF_subunit_A_rankNorm", "TNFR1_rankNorm", "IGFBP2_rankNorm", "vWF_rankNorm", "PECAM1_rankNorm", "MEPE_rankNorm", "CCL16_rankNorm","CA1_rankNorm", 
+                    "ICAM1_rankNorm", "CHL1_rankNorm", "TGFBI_rankNorm", "ENG_rankNorm", "PLTP_rankNorm", "SERPINA7_rankNorm", "IGFBP3_rankNorm", "CR2_rankNorm", "SERPINA5_rankNorm", "FCGR3B_rankNorm", "IGFBP6_rankNorm", "CDH1_rankNorm", "CCL5_rankNorm", "CCL14_rankNorm", "GNLY_rankNorm", 
+                    "NOTCH1_rankNorm", "PAM_rankNorm", "PROC_rankNorm", "CST3_rankNorm", "NCAM1_rankNorm", "PCOLCE_rankNorm", "LILRB1_rankNorm", "MET_rankNorm", "IL7R_rankNorm", "VCAM1_rankNorm", "SELL_rankNorm", "F11_rankNorm", "COMP_rankNorm", "CA4_rankNorm", "PTPRS_rankNorm", 
+                    "MBL2_rankNorm", "TIMP1_rankNorm", "ANGPTL3_rankNorm", "CD46_rankNorm", "TNC_rankNorm", "NID1_rankNorm", "CFHR5_rankNorm", "SPARCL1_rankNorm", "PLXNB2_rankNorm", "MEGF9_rankNorm", "ANG_rankNorm", "ST6GAL1_rankNorm", 
+                    "DPP4_rankNorm", "REG1A_rankNorm", "FCN2_rankNorm", "FETUB_rankNorm", "CES1_rankNorm", "CRTAC1_rankNorm", "TCN2_rankNorm", "PRSS2_rankNorm", "ICAM3_rankNorm", "SAA4_rankNorm", "CNDP1_rankNorm", "FCGR2A_rankNorm", "NRP1_rankNorm", "EFEMP1_rankNorm", "TIMD4_rankNorm", 
+                    "TIE1_rankNorm", "THBS4_rankNorm", "F7_rankNorm", "GP1BA_rankNorm", "LYVE1_rankNorm", "CA3_rankNorm", "TGFBR3_rankNorm", "CD59_rankNorm", "APOM_rankNorm", "OSMR_rankNorm", "LILRB2_rankNorm", "CCL18_rankNorm", "COL18A1_rankNorm", 
+                    "KIT_rankNorm", "C1QTNF1_rankNorm", "AOC3_rankNorm", "GAS6_rankNorm", "IGLC2_rankNorm", "PLA2G7_rankNorm", "TNXB_rankNorm", "MFAP5_rankNorm", "VASN_rankNorm", "LILRB5_rankNorm", "C2_rankNorm")
+
+# Path to the file containing the risk scores (should be tab separated, have a single header line and contain all the risk scores and covariates that are to be used in the analysis)
+score_file <- "C:\\Users\\anton\\Documents\\UMCU\\metagrs_comp_scores.txt"
+
+# prs_methods contains a list of PRS methods as they occur in the score_file, not necessarily in the same order
+#prs_methods <- c("CAD_PRSCS", "CAD_Rapido", "CAD_PLINK", "CAD_PRSice_B", "IS_PRSCS", "IS_Rapido", "IS_PLINK", "IS_PRSice_B", "CAD_PRSice_PF", "IS_PRSice_PF") # PRS methods of main project
+prs_methods <- c("Inouye_CAD", "Inouye_CAD_pos", "Inouye_CAD_neg", "Abraham_IS", "Abraham_IS_pos", "Abraham_IS_neg") # For the metagrs comparison
+
+scores <- read.table(score_file, sep="\t", header=TRUE)
+
+GLM.results <- data.frame(matrix(NA, ncol = 15, nrow = 0))
+
+### Loop used for plaque~prs associations
+# for (ind.plaque in 1:length(PLAQUE.CHARACTERISTICS.RANK)) {
+#   TRAIT = PLAQUE.CHARACTERISTICS.RANK[ind.plaque]
+#   plaquesize_cov = COVARIATES_M1[ind.plaque]
+# 
+#   for (ind.prs in 1:length(prs_methods)) {
+#     PRS = prs_methods[ind.prs]
+# 
+#     ## Extract the study number and protein levels
+#     currentDF <- as.data.frame(ExpressScan %>% # Extract from ExpressScan instead of the merged ExpressScan_OLINK
+#       dplyr::select(.,STUDY_NUMBER, plaquesize_cov, TRAIT) %>%
+#       filter(complete.cases(.))) %>%
+#       filter_if(~is.numeric(.), all_vars(!is.infinite(.)))
+# 
+#      # Merge histology data and risk score data on STUDY_NUMBER
+#     currentDF <- merge(currentDF, scores, by='STUDY_NUMBER')
+#     class(currentDF$Age) = "Numeric"
+#   
+#     currentDF <- currentDF[, c("Age", "Sex", "ORyear", "CHIP", "PC1", "PC2", PRS, TRAIT, plaquesize_cov)]
+#     currentDF <- na.omit(currentDF)
+#   
+#     # fit for model 2 (includes age + sex)
+#     fit <- lm(currentDF[,TRAIT] ~ currentDF[,PRS] + currentDF[,plaquesize_cov] + Age + Sex + ORyear + CHIP + PC1 + PC2, data = currentDF)
+#   
+#     # fit for model 1 (does not include age + sex)
+#     #fit <- lm(currentDF[,TRAIT] ~ currentDF[,PRS] + currentDF[,plaquesize_cov] + ORyear + CHIP + PC1 + PC2, data = currentDF)
+#   
+#     model_step <- stepAIC(fit, direction = "both", trace = FALSE)
+#     print(model_step)
+#     print(summary(fit))
+#   
+#     GLM.results.TEMP <- data.frame(matrix(NA, ncol = 15, nrow = 0))
+#     GLM.results.TEMP[1,] = GLM.CON(fit, "ExpressScan_OLINK", PRS, TRAIT, verbose = TRUE)
+#     GLM.results = rbind(GLM.results, GLM.results.TEMP)
+#   }
+# }
+
+### Loop used for protein~prs associations
+for (protein in 1:length(olink_proteins_rank)) {
+    PROTEIN = olink_proteins_rank[protein]
+
+    for (ind.prs in 1:length(prs_methods)) {
+      PRS = prs_methods[ind.prs]
+
+      # Extract the study number and protein levels
+      currentDF <- as.data.frame(AEDB_PlasmaProtein_OLINK_rank %>% # Extract from AEDB_PlasmaProtein_OLINK_rank instead of the merged ExpressScan_OLINK
+        dplyr::select(.,STUDY_NUMBER, PROTEIN) %>%
+        filter(complete.cases(.))) %>%
+        filter_if(~is.numeric(.), all_vars(!is.infinite(.)))
+
+      # Merge protein level data and risk score data on STUDY_NUMBER
+      currentDF <- merge(currentDF, scores, by='STUDY_NUMBER')
+      class(currentDF$Age) = "Numeric"
+      
+      # Extract phenotypes and covariates from from currentDF
+      currentDF <- currentDF[, c("Age", "Sex", "ORyear", "CHIP", "PC1", "PC2", PRS, PROTEIN)]
+      currentDF <- na.omit(currentDF)
+
+      ## fit for model WITH age and sex
+      fit <- lm(currentDF[,PROTEIN] ~ currentDF[,PRS] + Age + Sex + ORyear + CHIP + PC1 + PC2, data = currentDF)
+
+      ## fit for model WITHOUT age and sex
+      #fit <- lm(currentDF[,PROTEIN] ~ currentDF[,PRS] + ORyear + CHIP + PC1 + PC2, data = currentDF)
+
+      model_step <- stepAIC(fit, direction = "both", trace = FALSE)
+      print(model_step)
+      print(summary(fit))
+
+      GLM.results.TEMP <- data.frame(matrix(NA, ncol = 15, nrow = 0))
+      GLM.results.TEMP[1,] = GLM.CON(fit, "ExpressScan_OLINK", PRS, PROTEIN, verbose = TRUE)
+      GLM.results = rbind(GLM.results, GLM.results.TEMP)
+
+    }
+}
+
+cat("Edit the column names...\n")
+colnames(GLM.results) = c("Dataset", "Predictor", "Trait",
+                          "Beta", "s.e.m.",
+                          "OR", "low95CI", "up95CI",
+                          "T-value", "P-value", "r^2", "r^2_adj", "AE_N", "Model_N", "Perc_Miss")
+
+cat("Correct the variable types...\n")
+GLM.results$Beta <- as.numeric(GLM.results$Beta)
+GLM.results$s.e.m. <- as.numeric(GLM.results$s.e.m.)
+GLM.results$OR <- as.numeric(GLM.results$OR)
+GLM.results$low95CI <- as.numeric(GLM.results$low95CI)
+GLM.results$up95CI <- as.numeric(GLM.results$up95CI)
+GLM.results$`T-value` <- as.numeric(GLM.results$`T-value`)
+GLM.results$`P-value` <- as.numeric(GLM.results$`P-value`)
+GLM.results$`r^2` <- as.numeric(GLM.results$`r^2`)
+GLM.results$`r^2_adj` <- as.numeric(GLM.results$`r^2_adj`)
+GLM.results$`AE_N` <- as.numeric(GLM.results$`AE_N`)
+GLM.results$`Model_N` <- as.numeric(GLM.results$`Model_N`)
+GLM.results$`Perc_Miss` <- as.numeric(GLM.results$`Perc_Miss`)
+```
+
+```{r CrossSec: Cytokines - linear regression MODEL1 RANK Writing, include=FALSE}
+DT::datatable(GLM.results)
+
+# Save the data
+cat("Writing results to Excel-file...\n")
+### Univariate
+library(openxlsx)
+write.xlsx(GLM.results,
+           file = paste0(OUT_loc, "/",Today,".AEDB_CEA_GLYCC_OLINK_RANK_MODEL1.xlsx"), #change name based on plaque characteristic
+           row.names = FALSE, col.names = TRUE, sheetName = "HE")
+# Removing intermediates
+cat("Removing intermediate files...\n")
+rm(TRAIT, currentDF, GLM.results, GLM.results.TEMP, fit, model_step)
+```
+
+```{r}
+# Calculating PC's for the SlideToolkit plaque characteristics
+ExpressScan_plaquecharacteristics <- c("Total_CD34_TissueCount_rank","Total_CD66b_TissueCount_rank","Total_CD68_TissueCount_rank","Total_SMA_TissueCount_rank","Total_HE_TissueCount_rank","Total_EVG_Tissue_rank","Total_GLYCC_Tissue_rank")
+
+ExpressScan_PCs <- ExpressScan[ExpressScan_plaquecharacteristics]
+
+library(MVA)
+dt1 <- ExpressScan_PCs
+cord <- cor(dt1, use="pairwise.complete.obs")
+
+# Correlation plot
+library(corrplot)
+corrplot(cord, method="pie")
+
+ExpressScan.pca <- prcomp(cord, retx=TRUE, center=TRUE, scale.=TRUE, tol=NULL, rank.=NULL)
+summary(ExpressScan.pca)
+print("ExpressScan.pca")
+print(ExpressScan.pca)
+
+# Basic screeplot
+fviz_eig(ExpressScan.pca)
+fviz_eig(ExpressScan.pca, choice = "eigenvalue", addlabels = TRUE)
+
+# Calculating how many PCs are retained
+library(factoextra)
+eigenvalues <- get_eig(ExpressScan.pca)
+eig <- eigenvalues$eigenvalue
+
+library(nFactors)
+results <- nCng(eig, details=TRUE)
+results
+
+plotuScree(eig, main=paste(results$nFactors,
+" factors retained by the CNG procedure",
+sep=""))
+```
+
+```{r}
+
+# PC's OLINK data + screeplot
+## Creating a pairwise correlation matrix
+OLINK <-read.csv2("C:\\Users\\anton\\Documents\\UMCU\\Joost_data\\20210506OLINKplasma.csv")
+OLINK$X <- NULL
+
+p_missing <- unlist(lapply(OLINK, function(x) sum(is.na(x))))/nrow(OLINK)
+sort(p_missing[p_missing > 0], decreasing = TRUE)
+
+OLINKv2 <- OLINK[lapply(OLINK, function(x) sum(is.na(x)) / length(x) ) < 0.70 ]
+
+p_missing <- unlist(lapply(OLINKv2, function(x) sum(is.na(x))))/nrow(OLINKv2)
+sort(p_missing[p_missing > 0], decreasing = TRUE)
+
+dt1 <- OLINKv2 [,!colnames(OLINKv2) == "STUDY_NUMBER"]
+cord <- cor(dt1, use="pairwise.complete.obs")
+
+# Creating a heatmap and save this
+library(pheatmap)
+pheatmap(cord, cluster_row = TRUE, cluster_cols = TRUE, fontsize = 2, filename = "20211105 Heatmap OLINK.pdf")
+
+
+# Calculating the PC's
+olink.pca <- prcomp(cord, retx=TRUE, center=TRUE, scale.=TRUE, tol=NULL, rank.=NULL)
+summary(olink.pca)
+
+fviz_eig(olink.pca)
+fviz_eig(olink.pca, choice = "eigenvalue", addlabels = TRUE)
+
+
+# Determining how many PC's have to be retained
+eigenvalues <- get_eig(olink.pca)
+eig <- eigenvalues$eigenvalue
+results <- nCng(eig, details=TRUE)
+results
+
+plotuScree(eig, main=paste(results$nFactors,
+" factors retained by the CNG procedure",
+sep=""))
+
+#nCng(cord, cor=TRUE, model = "components", details=TRUE)
+
+```
